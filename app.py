@@ -223,6 +223,81 @@ async def dashboard_page(request: Request):
         "dashboard_data": dashboard_data
     })
 
+@app.post("/api/transaction-details")
+async def get_transaction_details(request: Request):
+    """API endpoint to get filtered transaction details for modal display"""
+    from fastapi import HTTPException
+    import json
+    
+    # Get request data
+    try:
+        data = await request.json()
+        filter_type = data.get('type')
+        category = data.get('category')
+    except:
+        raise HTTPException(status_code=400, detail="Invalid request data")
+    
+    # Get transactions from session
+    transactions = request.session.get('transactions', [])
+    
+    if not transactions:
+        raise HTTPException(status_code=404, detail="No transactions found in session")
+    
+    # Analyze transactions to get categories
+    analyzer = TransactionAnalyzer()
+    dashboard_data = analyzer.analyze_transactions(transactions)
+    
+    # Filter transactions based on type
+    filtered_transactions = []
+    total_amount = 0
+    
+    for transaction in transactions:
+        # Get transaction category
+        description = transaction.get('description', '')
+        amount_str = transaction.get('amount', '0')
+        tx_category = analyzer.classify_transaction(description, str(amount_str))
+        
+        # Add category color
+        transaction_copy = transaction.copy()
+        transaction_copy['category'] = tx_category
+        transaction_copy['category_color'] = dashboard_data.get('category_colors', {}).get(tx_category, '#6c757d')
+        
+        include_transaction = False
+        
+        if filter_type == 'all':
+            include_transaction = True
+        elif filter_type == 'spending':
+            # Include if it's a debit (negative amount)
+            amount = float(transaction.get('amount', 0))
+            if amount < 0:
+                include_transaction = True
+        elif filter_type == 'income':
+            # Include if it's a credit (positive amount) 
+            amount = float(transaction.get('amount', 0))
+            if amount > 0:
+                include_transaction = True
+        elif filter_type == 'investments':
+            # Include investment-related transactions
+            if tx_category in ['Investments', 'Savings', 'Insurance']:
+                include_transaction = True
+        elif filter_type == 'category' and category:
+            # Include if matches specific category
+            if tx_category == category:
+                include_transaction = True
+        
+        if include_transaction:
+            filtered_transactions.append(transaction_copy)
+            total_amount += float(transaction.get('amount', 0))
+    
+    # Sort by date (most recent first)
+    filtered_transactions.sort(key=lambda x: x.get('date', ''), reverse=True)
+    
+    return {
+        "transactions": filtered_transactions,
+        "total": abs(total_amount),
+        "count": len(filtered_transactions)
+    }
+
 @app.post("/upload")
 async def upload_pdf(request: Request, file: UploadFile = File(...)):
     """Handle PDF upload and processing"""
