@@ -13,11 +13,15 @@ from typing import Optional, List, Dict, Any
 import boto3
 from botocore.exceptions import ClientError
 from dotenv import load_dotenv
+import json
+import numpy as np
 
 # Import our custom modules
 from libs.extract_pdf import extract_pdf
 from libs.parse_transactions import parse_transactions
 from libs.query_agent import query_agent
+from libs.enhanced_pdf_extractor import EnhancedPDFExtractor, process_pdf_with_enhanced_extraction
+from libs.enhanced_query_agent import EnhancedQueryAgent, query_enhanced_document
 
 # Load environment variables
 load_dotenv()
@@ -118,12 +122,10 @@ async def index(request: Request):
 
 @app.get("/query", response_class=HTMLResponse)
 async def query_page(request: Request):
-    """Serve the query page"""
-    transactions = request.session.get("transactions", [])
-    return templates.TemplateResponse("query.html", {
-        "request": request, 
-        "transactions": transactions
-    })
+    """Query page"""
+    return templates.TemplateResponse("query.html", {"request": request})
+
+
 
 @app.post("/upload")
 async def upload_pdf(request: Request, file: UploadFile = File(...)):
@@ -162,49 +164,92 @@ async def upload_pdf(request: Request, file: UploadFile = File(...)):
         # Upload to S3
         await upload_to_s3(local_file_path, s3_key, content_type)
         
-        # Extract text using Textract
-        logger.info("Starting PDF extraction with Textract...")
-        textract_data = await extract_pdf(S3_BUCKET_NAME, s3_key)
+        # Use enhanced extraction system with fallback
+        logger.info("🚀 Starting enhanced PDF extraction...")
         
-        # Debug logging
-        if textract_data and textract_data.get('Blocks'):
-            logger.info(f"\n=== TEXTRACT EXTRACTION SUMMARY ===")
-            logger.info(f"Total blocks received: {len(textract_data['Blocks'])}")
+        extraction_method = "unknown"
+        transactions = []
+        extraction_info = {}
+        
+        # Validate S3 bucket configuration
+        if not S3_BUCKET_NAME:
+            raise HTTPException(status_code=500, detail="S3 bucket not configured")
+        
+        try:
+            # Try enhanced multilayer extraction first
+            enhanced_result = await process_pdf_with_enhanced_extraction(S3_BUCKET_NAME, s3_key)
             
-            block_types = {}
-            for block in textract_data['Blocks']:
-                block_type = block['BlockType']
-                block_types[block_type] = block_types.get(block_type, 0) + 1
+            if enhanced_result and "error" not in enhanced_result:
+                # Enhanced extraction succeeded
+                transactions = enhanced_result["transactions"]
+                extraction_method = "enhanced_multilayer_hybrid"
+                extraction_info = {
+                    "filename": file.filename,
+                    "s3_key": s3_key,
+                    "document_structure": enhanced_result["document_structure"],
+                    "extraction_method": extraction_method,
+                    "semantic_queries": enhanced_result.get("semantic_queries", {}),
+                    "total_elements": enhanced_result["document_structure"]["total_elements"]
+                }
+                logger.info(f"✅ Enhanced extraction successful: {len(transactions)} transactions, {extraction_info['total_elements']} elements")
+            else:
+                raise Exception("Enhanced extraction returned error")
+                
+        except Exception as enhanced_error:
+            logger.warning(f"Enhanced extraction failed: {enhanced_error}")
+            logger.info("📋 Falling back to standard Textract extraction...")
             
-            logger.info(f"Block types: {block_types}")
-            logger.info(f"Pages in document: {textract_data.get('DocumentMetadata', {}).get('Pages', 'unknown')}")
-            logger.info("================================\n")
+            # Fallback to standard Textract extraction
+            textract_data = await extract_pdf(S3_BUCKET_NAME, s3_key)
+            
+            if textract_data and textract_data.get('Blocks'):
+                logger.info(f"Standard extraction - Total blocks: {len(textract_data['Blocks'])}")
+                
+                # Parse transactions from standard extraction
+                transactions = parse_transactions(textract_data)
+                extraction_method = "aws_textract_fallback"
+                extraction_info = {
+                    "filename": file.filename,
+                    "s3_key": s3_key,
+                    "total_blocks": len(textract_data.get('Blocks', [])),
+                    "extraction_method": extraction_method
+                }
+                logger.info(f"✅ Standard extraction completed: {len(transactions)} transactions")
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Both enhanced and standard extraction failed. Please try a different file."
+                )
         
-        # Check if extraction was successful
-        if not textract_data:
-            raise HTTPException(
-                status_code=400,
-                detail="Failed to extract text from the uploaded document. Please try a different file or format."
-            )
-        
-        # Parse transactions
-        logger.info("Parsing transactions from extracted text...")
-        transactions = parse_transactions(textract_data)
+        # Check if we got any transactions
+        if not transactions:
+            logger.warning("No transactions found in the document")
+            extraction_info["warning"] = "No transactions detected in the document"
         
         # Store in session
         request.session["transactions"] = transactions
-        request.session["extraction_info"] = {
-            "filename": file.filename,
+        extraction_info.update({
             "total_transactions": len(transactions),
             "extracted_at": datetime.now().isoformat()
-        }
+        })
+        request.session["extraction_info"] = extraction_info
         
-        logger.info(f"Successfully processed {len(transactions)} transactions")
+        logger.info(f"Successfully processed {len(transactions)} transactions using {extraction_method}")
+        
+        # Create enhanced success message
+        if extraction_method == "enhanced_multilayer_hybrid":
+            message = f"🚀 Enhanced extraction completed! Found {len(transactions)} transactions with advanced semantic understanding."
+            if extraction_info.get('total_elements'):
+                message += f" Analyzed {extraction_info['total_elements']} document elements."
+        else:
+            message = f"✅ Successfully extracted {len(transactions)} transactions from your PDF using standard method."
         
         return JSONResponse({
             "success": True,
-            "message": f"Successfully extracted {len(transactions)} transactions from your PDF!",
+            "message": message,
             "transaction_count": len(transactions),
+            "extraction_method": extraction_method,
+            "enhanced_features": extraction_method == "enhanced_multilayer_hybrid",
             "redirect": "/query"
         })
         
@@ -221,9 +266,10 @@ async def upload_pdf(request: Request, file: UploadFile = File(...)):
 
 @app.post("/query")
 async def handle_query(request: Request, query: str = Form(...)):
-    """Handle AI query about transactions"""
+    """Handle AI query about transactions with enhanced capabilities"""
     
     transactions = request.session.get("transactions", [])
+    extraction_info = request.session.get("extraction_info", {})
     
     if not transactions:
         raise HTTPException(
@@ -232,15 +278,83 @@ async def handle_query(request: Request, query: str = Form(...)):
         )
     
     try:
-        logger.info(f"Processing query: {query}")
-        response = await query_agent(query, transactions)
+        logger.info(f"🔍 Processing query: '{query}' (Method: {extraction_info.get('extraction_method', 'unknown')})")
         
-        return JSONResponse({
-            "success": True,
-            "query": query,
-            "response": response,
-            "transaction_count": len(transactions)
-        })
+        # Check if we have enhanced extraction data available
+        extraction_method = extraction_info.get("extraction_method", "")
+        
+        if extraction_method == "enhanced_multilayer_hybrid":
+            # Use enhanced query capabilities
+            logger.info("Using enhanced semantic query processing...")
+            
+            # Create a simplified enhanced query agent
+            agent = EnhancedQueryAgent()
+            
+            # Perform semantic search on transactions
+            query_embedding = agent.embedding_model.encode([query])[0]
+            relevant_transactions = []
+            
+            for transaction in transactions:
+                description = transaction.get('description', '')
+                if description:
+                    desc_embedding = agent.embedding_model.encode([description])[0]
+                    similarity = np.dot(query_embedding, desc_embedding) / (
+                        np.linalg.norm(query_embedding) * np.linalg.norm(desc_embedding)
+                    )
+                    if similarity > 0.3:  # Similarity threshold
+                        transaction['relevance_score'] = float(similarity)
+                        relevant_transactions.append(transaction)
+            
+            # Sort by relevance
+            relevant_transactions.sort(key=lambda x: x.get('relevance_score', 0), reverse=True)
+            
+            # Generate enhanced response
+            context_info = f"""
+            Document Analysis:
+            - Extraction Method: Enhanced Multilayer Hybrid
+            - Total Elements: {extraction_info.get('total_elements', 'N/A')}
+            - Document Structure: {extraction_info.get('document_structure', {}).get('document_type', 'Unknown')}
+            - Pages: {extraction_info.get('document_structure', {}).get('pages', 'N/A')}
+            
+            Query: {query}
+            
+            Relevant Transactions ({len(relevant_transactions)} found):
+            """
+            
+            for i, t in enumerate(relevant_transactions[:10], 1):
+                score = t.get('relevance_score', 0) * 100
+                context_info += f"{i}. {t.get('date', 'N/A')} - {t.get('description', 'N/A')} - {t.get('amount', 'N/A')} (Relevance: {score:.1f}%)\n"
+            
+            response = await agent._call_claude(context_info + "\nPlease provide a comprehensive analysis based on this financial data.")
+            
+            query_result = {
+                "success": True,
+                "query": query,
+                "response": response,
+                "transaction_count": len(transactions),
+                "relevant_transactions": len(relevant_transactions),
+                "extraction_method": "enhanced_semantic_search",
+                "enhanced_features": {
+                    "semantic_search": True,
+                    "relevance_scoring": True,
+                    "document_structure_analysis": True
+                }
+            }
+            
+        else:
+            # Use standard query processing
+            logger.info("Using standard query processing...")
+            response = await query_agent(query, transactions)
+            
+            query_result = {
+                "success": True,
+                "query": query,
+                "response": response,
+                "transaction_count": len(transactions),
+                "extraction_method": "standard_query"
+            }
+        
+        return JSONResponse(query_result)
         
     except Exception as e:
         logger.error(f"Error processing query: {str(e)}")
@@ -268,6 +382,8 @@ async def clear_transactions(request: Request):
         "success": True,
         "message": "Transactions cleared"
     })
+
+
 
 @app.get("/health")
 async def health_check():

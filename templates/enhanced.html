@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enhanced PDF Analysis</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 10px;
+            padding: 30px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .header h1 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+        
+        .enhanced-badge {
+            background: linear-gradient(45deg, #ff6b6b, #4ecdc4);
+            color: white;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        
+        .upload-section, .query-section, .results-section {
+            margin-bottom: 30px;
+            padding: 20px;
+            border: 1px solid #eee;
+            border-radius: 8px;
+            background: #f9f9f9;
+        }
+        
+        .section-title {
+            color: #333;
+            margin-bottom: 15px;
+            font-size: 18px;
+            font-weight: bold;
+        }
+        
+        .file-input-container {
+            position: relative;
+            display: inline-block;
+            margin-right: 15px;
+        }
+        
+        .file-input {
+            opacity: 0;
+            width: 0.1px;
+            height: 0.1px;
+            position: absolute;
+        }
+        
+        .file-input-label {
+            display: inline-block;
+            padding: 10px 20px;
+            background: #4CAF50;
+            color: white;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        
+        .file-input-label:hover {
+            background: #45a049;
+        }
+        
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+        
+        .btn-primary {
+            background: #007bff;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: #0056b3;
+        }
+        
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+        
+        .btn-secondary:hover {
+            background: #545b62;
+        }
+        
+        .query-input {
+            width: 70%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+            margin-right: 10px;
+        }
+        
+        .status {
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+        
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .status.info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+        
+        .results-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-top: 20px;
+        }
+        
+        .result-card {
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 15px;
+            background: white;
+        }
+        
+        .result-card h3 {
+            margin-top: 0;
+            color: #333;
+        }
+        
+        .transaction-list {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        
+        .transaction-item {
+            padding: 8px;
+            border-bottom: 1px solid #eee;
+            font-size: 12px;
+        }
+        
+        .semantic-match {
+            padding: 5px;
+            margin: 5px 0;
+            background: #e3f2fd;
+            border-radius: 3px;
+            font-size: 12px;
+        }
+        
+        .confidence-score {
+            float: right;
+            font-weight: bold;
+            color: #1976d2;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 20px;
+        }
+        
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 2s linear infinite;
+            margin: 0 auto;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .example-queries {
+            margin-top: 10px;
+        }
+        
+        .example-query {
+            display: inline-block;
+            margin: 2px;
+            padding: 5px 10px;
+            background: #e9ecef;
+            border-radius: 15px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        
+        .example-query:hover {
+            background: #dee2e6;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Enhanced PDF Analysis <span class="enhanced-badge">MULTILAYER EXTRACTION</span></h1>
+            <p>Advanced PDF understanding with semantic search and AI reasoning</p>
+        </div>
+
+        <!-- Upload Section -->
+        <div class="upload-section">
+            <div class="section-title">📄 Upload Bank Statement</div>
+            <div class="file-input-container">
+                <input type="file" id="pdfFile" class="file-input" accept=".pdf" />
+                <label for="pdfFile" class="file-input-label">Choose PDF File</label>
+            </div>
+            <button id="uploadBtn" class="btn btn-primary" onclick="uploadFile()">
+                🚀 Enhanced Extract
+            </button>
+            <button id="clearBtn" class="btn btn-secondary" onclick="clearData()">
+                🗑️ Clear
+            </button>
+            <div id="uploadStatus"></div>
+        </div>
+
+        <!-- Query Section -->
+        <div class="query-section">
+            <div class="section-title">🧠 Semantic Query</div>
+            <input type="text" id="queryInput" class="query-input" placeholder="Ask anything about your transactions..." />
+            <button id="queryBtn" class="btn btn-primary" onclick="submitQuery()">
+                🔍 Search
+            </button>
+            
+            <div class="example-queries">
+                <strong>Try these examples:</strong><br>
+                <span class="example-query" onclick="setQuery('total amount spent on food')">total amount spent on food</span>
+                <span class="example-query" onclick="setQuery('transactions to Alpana Kundu')">transactions to Alpana Kundu</span>
+                <span class="example-query" onclick="setQuery('all credit transactions')">all credit transactions</span>
+                <span class="example-query" onclick="setQuery('balance at end of month')">balance at end of month</span>
+                <span class="example-query" onclick="setQuery('largest transaction amount')">largest transaction amount</span>
+            </div>
+            <div id="queryStatus"></div>
+        </div>
+
+        <!-- Results Section -->
+        <div class="results-section">
+            <div class="section-title">📊 Results</div>
+            <div id="results"></div>
+        </div>
+    </div>
+
+    <script>
+        let documentProcessed = false;
+
+        async function uploadFile() {
+            const fileInput = document.getElementById('pdfFile');
+            const uploadBtn = document.getElementById('uploadBtn');
+            const statusDiv = document.getElementById('uploadStatus');
+            
+            if (!fileInput.files[0]) {
+                showStatus('Please select a PDF file first.', 'error', 'uploadStatus');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+
+            uploadBtn.disabled = true;
+            uploadBtn.textContent = '🔄 Processing...';
+            showStatus('Starting enhanced extraction...', 'info', 'uploadStatus');
+
+            try {
+                const response = await fetch('/api/enhanced-extract', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    documentProcessed = true;
+                    showStatus(`✅ Success! Extracted ${result.total_transactions} transactions using ${result.extraction_method}`, 'success', 'uploadStatus');
+                    
+                    // Show document structure info
+                    const structureInfo = result.document_structure;
+                    let structureHtml = `
+                        <div class="result-card">
+                            <h3>📋 Document Analysis</h3>
+                            <p><strong>Type:</strong> ${structureInfo.document_type}</p>
+                            <p><strong>Pages:</strong> ${structureInfo.pages}</p>
+                            <p><strong>Elements:</strong> ${structureInfo.total_elements}</p>
+                            <p><strong>Semantic Categories:</strong> ${structureInfo.semantic_categories}</p>
+                            <p><strong>Transaction Clusters:</strong> ${structureInfo.transaction_clusters}</p>
+                        </div>
+                    `;
+                    
+                    // Show sample transactions
+                    if (result.transactions && result.transactions.length > 0) {
+                        structureHtml += `
+                            <div class="result-card">
+                                <h3>💳 Sample Transactions</h3>
+                                <div class="transaction-list">
+                        `;
+                        
+                        result.transactions.slice(0, 10).forEach(t => {
+                            structureHtml += `
+                                <div class="transaction-item">
+                                    <strong>${t.date || 'N/A'}</strong><br>
+                                    ${t.description || 'N/A'}<br>
+                                    Amount: ${t.amount || 'N/A'} | Balance: ${t.balance || 'N/A'}
+                                </div>
+                            `;
+                        });
+                        
+                        structureHtml += '</div></div>';
+                    }
+                    
+                    document.getElementById('results').innerHTML = structureHtml;
+                } else {
+                    showStatus(`❌ Error: ${result.detail || 'Unknown error'}`, 'error', 'uploadStatus');
+                }
+            } catch (error) {
+                showStatus(`❌ Error: ${error.message}`, 'error', 'uploadStatus');
+            } finally {
+                uploadBtn.disabled = false;
+                uploadBtn.textContent = '🚀 Enhanced Extract';
+            }
+        }
+
+        async function submitQuery() {
+            const queryInput = document.getElementById('queryInput');
+            const queryBtn = document.getElementById('queryBtn');
+            const query = queryInput.value.trim();
+            
+            if (!query) {
+                showStatus('Please enter a query.', 'error', 'queryStatus');
+                return;
+            }
+
+            if (!documentProcessed) {
+                showStatus('Please upload and process a document first.', 'error', 'queryStatus');
+                return;
+            }
+
+            queryBtn.disabled = true;
+            queryBtn.textContent = '🧠 Processing...';
+            showStatus('Performing semantic search...', 'info', 'queryStatus');
+
+            try {
+                const response = await fetch('/api/enhanced-query', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ query: query })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    showStatus('✅ Query completed!', 'success', 'queryStatus');
+                    
+                    let resultsHtml = `
+                        <div class="results-grid">
+                            <div class="result-card">
+                                <h3>🤖 AI Response</h3>
+                                <div style="background: #f8f9fa; padding: 15px; border-radius: 5px; margin-top: 10px;">
+                                    ${result.answer.replace(/\n/g, '<br>')}
+                                </div>
+                            </div>
+                            
+                            <div class="result-card">
+                                <h3>🎯 Relevant Transactions (${result.total_relevant})</h3>
+                                <div class="transaction-list">
+                    `;
+                    
+                    if (result.relevant_transactions && result.relevant_transactions.length > 0) {
+                        result.relevant_transactions.forEach(t => {
+                            const score = (t.relevance_score * 100).toFixed(1);
+                            resultsHtml += `
+                                <div class="transaction-item">
+                                    <div class="confidence-score">${score}%</div>
+                                    <strong>${t.date || 'N/A'}</strong><br>
+                                    ${t.description || 'N/A'}<br>
+                                    Amount: ${t.amount || 'N/A'}
+                                </div>
+                            `;
+                        });
+                    } else {
+                        resultsHtml += '<p>No relevant transactions found.</p>';
+                    }
+                    
+                    resultsHtml += '</div></div></div>';
+                    
+                    document.getElementById('results').innerHTML = resultsHtml;
+                } else {
+                    showStatus(`❌ Query failed: ${result.detail || 'Unknown error'}`, 'error', 'queryStatus');
+                }
+            } catch (error) {
+                showStatus(`❌ Error: ${error.message}`, 'error', 'queryStatus');
+            } finally {
+                queryBtn.disabled = false;
+                queryBtn.textContent = '🔍 Search';
+            }
+        }
+
+        function setQuery(query) {
+            document.getElementById('queryInput').value = query;
+        }
+
+        async function clearData() {
+            try {
+                await fetch('/api/transactions', { method: 'DELETE' });
+                documentProcessed = false;
+                document.getElementById('results').innerHTML = '';
+                document.getElementById('uploadStatus').innerHTML = '';
+                document.getElementById('queryStatus').innerHTML = '';
+                document.getElementById('queryInput').value = '';
+                document.getElementById('pdfFile').value = '';
+                showStatus('✅ Data cleared.', 'success', 'uploadStatus');
+            } catch (error) {
+                showStatus(`❌ Error clearing data: ${error.message}`, 'error', 'uploadStatus');
+            }
+        }
+
+        function showStatus(message, type, elementId) {
+            const statusDiv = document.getElementById(elementId);
+            statusDiv.innerHTML = `<div class="status ${type}">${message}</div>`;
+        }
+
+        // Enable query on Enter key
+        document.getElementById('queryInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                submitQuery();
+            }
+        });
+
+        // Check if document is already processed on page load
+        window.addEventListener('load', async function() {
+            try {
+                const response = await fetch('/api/enhanced-status');
+                const result = await response.json();
+                if (result.processed) {
+                    documentProcessed = true;
+                    showStatus(`✅ Document already processed (${result.transaction_count} transactions)`, 'success', 'uploadStatus');
+                }
+            } catch (error) {
+                // Ignore errors on status check
+            }
+        });
+    </script>
+</body>
+</html>

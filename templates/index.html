@@ -11,7 +11,14 @@
     <div class="row justify-content-center">
       <div class="col-md-8">
         <h1 class="mb-4 text-center">📊 Finance PDF Analysis</h1>
-        <p class="text-center text-muted mb-5">Upload your bank statement PDF and analyze transactions with AI</p>
+        <p class="text-center text-muted mb-4">Upload your bank statement PDF and analyze transactions with AI</p>
+        
+        <!-- Enhanced Features Banner -->
+        <div class="alert alert-success text-center mb-4" role="alert">
+          <strong>🚀 NOW WITH ENHANCED MULTILAYER EXTRACTION!</strong><br>
+          Advanced PDF understanding with semantic search and AI reasoning built-in.<br>
+          <small class="text-muted">Upload any PDF to experience enhanced processing automatically</small>
+        </div>
 
         <!-- Upload Form -->
         <form id="uploadForm" action="/upload" method="post" enctype="multipart/form-data" class="bg-white p-4 rounded shadow-sm">
@@ -66,27 +73,27 @@
           <div class="col-md-4 text-center">
             <div class="card h-100 border-0">
               <div class="card-body">
-                <h3>🔍</h3>
-                <h6>Multi-Strategy Extraction</h6>
-                <small class="text-muted">Advanced PDF processing with multiple fallback methods</small>
+                <h3>🧠</h3>
+                <h6>Enhanced Semantic Extraction</h6>
+                <small class="text-muted">Multilayer hybrid approach with layout awareness and semantic understanding</small>
               </div>
             </div>
           </div>
           <div class="col-md-4 text-center">
             <div class="card h-100 border-0">
               <div class="card-body">
-                <h3>📄</h3>
-                <h6>Multi-Page Support</h6>
-                <small class="text-muted">Handles complex documents with transactions across multiple pages</small>
+                <h3>�</h3>
+                <h6>Smart Query Processing</h6>
+                <small class="text-muted">Natural language queries with relevance scoring and contextual search</small>
               </div>
             </div>
           </div>
           <div class="col-md-4 text-center">
             <div class="card h-100 border-0">
               <div class="card-body">
-                <h3>🤖</h3>
-                <h6>AI Analysis</h6>
-                <small class="text-muted">Ask questions about your transactions using Claude AI</small>
+                <h3>🚀</h3>
+                <h6>Adaptive Intelligence</h6>
+                <small class="text-muted">Automatically selects best extraction method with fallback support</small>
               </div>
             </div>
           </div>
@@ -127,7 +134,15 @@
         progressSection.classList.add('d-none');
         
         if (response.ok && result.success) {
-          document.getElementById('resultMessage').textContent = result.message;
+          let message = result.message;
+          
+          // Add enhanced features badge if using enhanced extraction
+          if (result.enhanced_features) {
+            message += `<br><br><span class="badge bg-info">🚀 Enhanced Processing</span> 
+                       <small class="d-block mt-1">Advanced semantic understanding and improved accuracy</small>`;
+          }
+          
+          document.getElementById('resultMessage').innerHTML = message;
           resultSection.classList.remove('d-none');
         } else {
           throw new Error(result.detail || 'Upload failed');
