@@ -1,4 +1,4 @@
-# Intelligent column mapping for better transaction parsing
+# Financial Dashboard with intelligent transaction categorization
 from fastapi import FastAPI, File, UploadFile, HTTPException, Request, Form
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -25,6 +25,7 @@ from libs.parse_transactions import parse_transactions
 from libs.query_agent import query_agent
 from libs.enhanced_pdf_extractor import EnhancedPDFExtractor, process_pdf_with_enhanced_extraction
 from libs.enhanced_query_agent import EnhancedQueryAgent, query_enhanced_document
+from libs.dashboard_analytics import TransactionAnalyzer
 
 # Load environment variables
 load_dotenv()
@@ -189,7 +190,38 @@ async def query_page(request: Request):
         "extraction_info": extraction_info
     })
 
-
+@app.get("/dashboard", response_class=HTMLResponse)
+async def dashboard_page(request: Request):
+    """Financial dashboard with analytics"""
+    transactions = request.session.get("transactions", [])
+    extraction_info = request.session.get("extraction_info", {})
+    
+    # If no session data, try to restore from persistent storage
+    if not transactions:
+        session_id = get_session_id(request)
+        saved_data = load_session_data(session_id)
+        if saved_data:
+            transactions = saved_data.get("transactions", [])
+            extraction_info = saved_data.get("extraction_info", {})
+            
+            # Restore to session
+            request.session["transactions"] = transactions
+            request.session["extraction_info"] = extraction_info
+            logger.info(f"Restored session data for dashboard - Transactions count: {len(transactions)}")
+    
+    # Analyze transactions for dashboard
+    dashboard_data = {}
+    if transactions:
+        analyzer = TransactionAnalyzer()
+        dashboard_data = analyzer.analyze_transactions(transactions)
+        logger.info(f"Dashboard analytics completed for {len(transactions)} transactions")
+    
+    return templates.TemplateResponse("dashboard.html", {
+        "request": request,
+        "transactions": transactions,
+        "extraction_info": extraction_info,
+        "dashboard_data": dashboard_data
+    })
 
 @app.post("/upload")
 async def upload_pdf(request: Request, file: UploadFile = File(...)):
