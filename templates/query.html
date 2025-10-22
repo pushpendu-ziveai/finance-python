@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Query Your Bank Transactions - Python FastAPI</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
+</head>
+<body class="bg-light">
+  <div class="container py-5">
+    <div class="row">
+      <div class="col-lg-8">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+          <h1>💬 Ask About Your Transactions</h1>
+          <a href="/" class="btn btn-outline-secondary">Upload New PDF</a>
+        </div>
+
+        <!-- Transaction Summary -->
+        {% if transactions %}
+        <div class="card mb-4">
+          <div class="card-body">
+            <h5 class="card-title">📊 Transaction Summary</h5>
+            <div class="row">
+              <div class="col-md-6">
+                <p class="mb-1"><strong>Total Transactions:</strong> {{ transactions|length }}</p>
+                {% set pages = transactions|map(attribute='page')|unique|list %}
+                <p class="mb-1"><strong>Pages Processed:</strong> {{ pages|length }}</p>
+              </div>
+              <div class="col-md-6">
+                <button class="btn btn-sm btn-outline-info" onclick="toggleTransactions()">
+                  View All Transactions
+                </button>
+                <button class="btn btn-sm btn-outline-danger" onclick="clearTransactions()">
+                  Clear Data
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Collapsible Transaction List -->
+        <div id="transactionList" class="card mb-4 d-none">
+          <div class="card-header">
+            <h6 class="mb-0">All Transactions</h6>
+          </div>
+          <div class="card-body" style="max-height: 300px; overflow-y: auto;">
+            <div class="table-responsive">
+              <table class="table table-sm">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Description</th>
+                    <th>Amount</th>
+                    <th>Balance</th>
+                    <th>Page</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for transaction in transactions %}
+                  <tr>
+                    <td>{{ transaction.date or 'N/A' }}</td>
+                    <td>{{ transaction.description or 'N/A' }}</td>
+                    <td>{{ transaction.amount or 'N/A' }}</td>
+                    <td>{{ transaction.balance or 'N/A' }}</td>
+                    <td>{{ transaction.page or 'N/A' }}</td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        {% else %}
+        <div class="alert alert-warning" role="alert">
+          <h5 class="alert-heading">No Transactions Found</h5>
+          <p>Please <a href="/" class="alert-link">upload a PDF</a> first to analyze transactions.</p>
+        </div>
+        {% endif %}
+
+        <!-- Query Form -->
+        {% if transactions %}
+        <form id="queryForm" class="bg-white p-4 rounded shadow-sm mb-4">
+          <div class="mb-3">
+            <label for="query" class="form-label">Enter your question about the transactions</label>
+            <input type="text" class="form-control" id="query" name="query" 
+                   placeholder="e.g., What was my total spending last month? Show me all transactions over $100." 
+                   required />
+            <div class="form-text">
+              Try asking about: spending patterns, specific transactions, totals, categories, dates, or trends
+            </div>
+          </div>
+          
+          <div class="d-grid">
+            <button type="submit" class="btn btn-primary btn-lg" id="queryBtn">
+              <span class="spinner-border spinner-border-sm d-none" id="querySpinner" role="status" aria-hidden="true"></span>
+              <span id="queryText">Ask AI Assistant</span>
+            </button>
+          </div>
+        </form>
+
+        <!-- Query Examples -->
+        <div class="card mb-4">
+          <div class="card-body">
+            <h6 class="card-title">💡 Example Questions</h6>
+            <div class="row">
+              <div class="col-md-6">
+                <button class="btn btn-sm btn-outline-primary mb-2 w-100" onclick="setQuery('What was my total spending?')">
+                  What was my total spending?
+                </button>
+                <button class="btn btn-sm btn-outline-primary mb-2 w-100" onclick="setQuery('Show me transactions over $100')">
+                  Show me transactions over $100
+                </button>
+              </div>
+              <div class="col-md-6">
+                <button class="btn btn-sm btn-outline-primary mb-2 w-100" onclick="setQuery('What are my largest expenses?')">
+                  What are my largest expenses?
+                </button>
+                <button class="btn btn-sm btn-outline-primary mb-2 w-100" onclick="setQuery('Summarize my spending patterns')">
+                  Summarize my spending patterns
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Response Section -->
+        <div id="responseSection" class="card d-none">
+          <div class="card-header">
+            <h6 class="mb-0">🤖 AI Assistant Response</h6>
+          </div>
+          <div class="card-body">
+            <div id="response" style="white-space: pre-wrap; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6;"></div>
+          </div>
+        </div>
+        {% endif %}
+      </div>
+
+      <!-- Sidebar with Tips -->
+      <div class="col-lg-4">
+        <div class="card">
+          <div class="card-body">
+            <h6 class="card-title">🎯 Tips for Better Queries</h6>
+            <ul class="small">
+              <li>Be specific about date ranges</li>
+              <li>Ask about spending categories</li>
+              <li>Request summaries and totals</li>
+              <li>Look for patterns and trends</li>
+              <li>Ask about specific transaction amounts</li>
+            </ul>
+          </div>
+        </div>
+
+        {% if transactions %}
+        <div class="card mt-3">
+          <div class="card-body">
+            <h6 class="card-title">📈 Quick Stats</h6>
+            {% set total_amount = 0 %}
+            {% set transaction_count = transactions|length %}
+            <p class="mb-1"><strong>Transactions:</strong> {{ transaction_count }}</p>
+            {% set pages = transactions|map(attribute='page')|unique|list %}
+            <p class="mb-1"><strong>Pages:</strong> {{ pages|length }}</p>
+            <p class="mb-1"><strong>Source:</strong> PDF Analysis</p>
+          </div>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    function toggleTransactions() {
+      const list = document.getElementById('transactionList');
+      list.classList.toggle('d-none');
+    }
+
+    function setQuery(query) {
+      document.getElementById('query').value = query;
+    }
+
+    async function clearTransactions() {
+      if (confirm('Are you sure you want to clear all transaction data?')) {
+        try {
+          const response = await fetch('/api/transactions', {
+            method: 'DELETE'
+          });
+          
+          if (response.ok) {
+            window.location.href = '/';
+          } else {
+            alert('Failed to clear transactions');
+          }
+        } catch (error) {
+          console.error('Error clearing transactions:', error);
+          alert('Error clearing transactions');
+        }
+      }
+    }
+
+    // Query form handling
+    document.getElementById('queryForm')?.addEventListener('submit', async function(e) {
+      e.preventDefault();
+      
+      const queryBtn = document.getElementById('queryBtn');
+      const queryText = document.getElementById('queryText');
+      const querySpinner = document.getElementById('querySpinner');
+      const responseSection = document.getElementById('responseSection');
+      const responseDiv = document.getElementById('response');
+      const query = document.getElementById('query').value.trim();
+      
+      if (!query) {
+        alert('Please enter a question.');
+        return;
+      }
+      
+      // Show loading state
+      queryBtn.disabled = true;
+      querySpinner.classList.remove('d-none');
+      queryText.textContent = 'Processing...';
+      responseDiv.textContent = 'Thinking...';
+      responseSection.classList.remove('d-none');
+      
+      try {
+        const formData = new FormData();
+        formData.append('query', query);
+        
+        const response = await fetch('/query', {
+          method: 'POST',
+          body: formData
+        });
+        
+        const result = await response.json();
+        
+        if (response.ok && result.success) {
+          responseDiv.textContent = result.response;
+        } else {
+          throw new Error(result.detail || 'Query failed');
+        }
+        
+      } catch (error) {
+        console.error('Query error:', error);
+        responseDiv.textContent = 'Error: ' + (error.message || 'An unexpected error occurred. Please try again.');
+      } finally {
+        // Reset button state
+        queryBtn.disabled = false;
+        querySpinner.classList.add('d-none');
+        queryText.textContent = 'Ask AI Assistant';
+      }
+    });
+  </script>
+</body>
+</html>
