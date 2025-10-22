@@ -15,6 +15,8 @@ from botocore.exceptions import ClientError
 from dotenv import load_dotenv
 import json
 import numpy as np
+import pickle
+import hashlib
 
 # Import our custom modules
 from libs.extract_pdf import extract_pdf
@@ -37,19 +39,24 @@ app = FastAPI(
     version="2.0.0"
 )
 
-# Add session middleware
+# Add session middleware with more robust configuration
 app.add_middleware(
     SessionMiddleware, 
-    secret_key=os.getenv("FASTAPI_SECRET_KEY", "finance-app-secret-key-python")
+    secret_key=os.getenv("FASTAPI_SECRET_KEY", "finance-app-secret-key-python"),
+    max_age=7200,  # 2 hours
+    same_site="lax"
 )
 
 # Setup static files and templates
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
-# Create uploads directory if it doesn't exist
+# Create uploads and sessions directories if they don't exist
 UPLOAD_DIR = Path("uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
+
+SESSIONS_DIR = Path("sessions")
+SESSIONS_DIR.mkdir(exist_ok=True)
 
 # AWS Configuration
 AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
@@ -78,8 +85,8 @@ async def save_uploaded_file(file: UploadFile) -> str:
     """Save uploaded file to disk and return the file path"""
     # Generate unique filename
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    original_name = Path(file.filename).stem
-    file_ext = Path(file.filename).suffix
+    original_name = Path(file.filename).stem # type: ignore
+    file_ext = Path(file.filename).suffix # type: ignore
     filename = f"{original_name}_{timestamp}{file_ext}"
     
     file_path = UPLOAD_DIR / filename
@@ -115,6 +122,37 @@ def cleanup_file(file_path: str) -> None:
     except Exception as e:
         logger.error(f"Error cleaning up file {file_path}: {e}")
 
+def get_session_id(request: Request) -> str:
+    """Generate a session ID from request IP and user agent"""
+    user_agent = request.headers.get("user-agent", "")
+    client_ip = request.client.host if request.client else "unknown"
+    session_string = f"{client_ip}_{user_agent}"
+    return hashlib.md5(session_string.encode()).hexdigest()
+
+def save_session_data(session_id: str, data: Dict[str, Any]) -> None:
+    """Save session data to file"""
+    try:
+        session_file = SESSIONS_DIR / f"{session_id}.pkl"
+        with open(session_file, 'wb') as f:
+            pickle.dump(data, f)
+        logger.info(f"Session data saved: {session_id}")
+    except Exception as e:
+        logger.error(f"Failed to save session data: {e}")
+
+def load_session_data(session_id: str) -> Dict[str, Any]:
+    """Load session data from file"""
+    try:
+        session_file = SESSIONS_DIR / f"{session_id}.pkl"
+        if session_file.exists():
+            with open(session_file, 'rb') as f:
+                data = pickle.load(f)
+            logger.info(f"Session data loaded: {session_id}")
+            return data
+        return {}
+    except Exception as e:
+        logger.error(f"Failed to load session data: {e}")
+        return {}
+
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     """Serve the main upload page"""
@@ -122,8 +160,33 @@ async def index(request: Request):
 
 @app.get("/query", response_class=HTMLResponse)
 async def query_page(request: Request):
-    """Query page"""
-    return templates.TemplateResponse("query.html", {"request": request})
+    """Query page with transaction data"""
+    transactions = request.session.get("transactions", [])
+    extraction_info = request.session.get("extraction_info", {})
+    
+    # If no session data, try to restore from persistent storage
+    if not transactions:
+        session_id = get_session_id(request)
+        saved_data = load_session_data(session_id)
+        if saved_data:
+            transactions = saved_data.get("transactions", [])
+            extraction_info = saved_data.get("extraction_info", {})
+            
+            # Restore to session
+            request.session["transactions"] = transactions
+            request.session["extraction_info"] = extraction_info
+            logger.info(f"Restored session data - Transactions count: {len(transactions)}")
+    
+    # Debug logging
+    logger.info(f"Query page accessed - Transactions count: {len(transactions)}")
+    if extraction_info:
+        logger.info(f"Extraction info: {extraction_info}")
+    
+    return templates.TemplateResponse("query.html", {
+        "request": request,
+        "transactions": transactions,
+        "extraction_info": extraction_info
+    })
 
 
 
@@ -234,6 +297,13 @@ async def upload_pdf(request: Request, file: UploadFile = File(...)):
         })
         request.session["extraction_info"] = extraction_info
         
+        # Persist session data to file
+        session_id = get_session_id(request)
+        save_session_data(session_id, {
+            "transactions": transactions,
+            "extraction_info": extraction_info
+        })
+        
         logger.info(f"Successfully processed {len(transactions)} transactions using {extraction_method}")
         
         # Create enhanced success message
@@ -270,6 +340,19 @@ async def handle_query(request: Request, query: str = Form(...)):
     
     transactions = request.session.get("transactions", [])
     extraction_info = request.session.get("extraction_info", {})
+    
+    # If no session data, try to restore from persistent storage
+    if not transactions:
+        session_id = get_session_id(request)
+        saved_data = load_session_data(session_id)
+        if saved_data:
+            transactions = saved_data.get("transactions", [])
+            extraction_info = saved_data.get("extraction_info", {})
+            
+            # Restore to session
+            request.session["transactions"] = transactions
+            request.session["extraction_info"] = extraction_info
+            logger.info(f"Restored session data for query - Transactions count: {len(transactions)}")
     
     if not transactions:
         raise HTTPException(
@@ -384,6 +467,21 @@ async def clear_transactions(request: Request):
     })
 
 
+
+@app.get("/debug/session")
+async def debug_session(request: Request):
+    """Debug session data"""
+    transactions = request.session.get("transactions", [])
+    extraction_info = request.session.get("extraction_info", {})
+    
+    logger.info(f"Debug session - Transactions: {len(transactions)}, Keys: {list(request.session.keys())}")
+    
+    return JSONResponse({
+        "transactions_count": len(transactions),
+        "extraction_info": extraction_info,
+        "session_keys": list(request.session.keys()),
+        "sample_transaction": transactions[0] if transactions else None
+    })
 
 @app.get("/health")
 async def health_check():
