@@ -64,6 +64,95 @@ def parse_transactions(textract_response: Dict[str, Any]) -> List[Dict[str, Any]
     
     return text_transactions
 
+def detect_column_mapping(header_row: Dict[int, str]) -> Dict[str, int]:
+    """Detect which column contains which type of data based on header text"""
+    mapping = {}
+    
+    for col_idx, header_text in header_row.items():
+        header_lower = header_text.lower()
+        
+        # Date column detection
+        if any(keyword in header_lower for keyword in ['date', 'transaction date', 'txn date', 'posting date']):
+            mapping['date'] = col_idx
+        
+        # Description column detection  
+        elif any(keyword in header_lower for keyword in ['description', 'particulars', 'details', 'transaction details', 'narration', 'remarks']):
+            mapping['description'] = col_idx
+            
+        # Amount columns detection
+        elif any(keyword in header_lower for keyword in ['withdrawal', 'debit', 'dr', 'paid out']):
+            mapping['debit_amount'] = col_idx
+        elif any(keyword in header_lower for keyword in ['deposit', 'credit', 'cr', 'received']):
+            mapping['credit_amount'] = col_idx
+        elif any(keyword in header_lower for keyword in ['amount', 'txn amount', 'transaction amount']):
+            mapping['amount'] = col_idx
+            
+        # Balance column detection
+        elif any(keyword in header_lower for keyword in ['balance', 'running balance', 'available balance', 'closing balance']):
+            mapping['balance'] = col_idx
+            
+        # Reference number
+        elif any(keyword in header_lower for keyword in ['reference', 'ref no', 'cheque no', 'transaction id']):
+            mapping['reference'] = col_idx
+    
+    # Fallback: if no mapping found, use positional defaults
+    if not mapping:
+        logger.warning("No header mapping found, using positional defaults")
+        mapping = {'date': 1, 'description': 2, 'amount': 3, 'balance': 4}
+    
+    return mapping
+
+def create_mapped_transaction(row_data: List[str], column_mapping: Dict[str, int], page_num: int) -> Dict[str, Any]:
+    """Create transaction object using intelligent column mapping"""
+    
+    # Helper function to safely get column data
+    def get_col_data(col_idx: int) -> str:
+        return row_data[col_idx - 1].strip() if col_idx <= len(row_data) and col_idx > 0 else ''
+    
+    # Extract basic fields
+    date = get_col_data(column_mapping.get('date', 1))
+    description = get_col_data(column_mapping.get('description', 2))
+    balance = get_col_data(column_mapping.get('balance', 0))
+    reference = get_col_data(column_mapping.get('reference', 0))
+    
+    # Handle amount - prefer separate debit/credit columns, fallback to single amount
+    amount = ''
+    transaction_type = ''
+    
+    if 'debit_amount' in column_mapping and 'credit_amount' in column_mapping:
+        debit = get_col_data(column_mapping['debit_amount'])
+        credit = get_col_data(column_mapping['credit_amount'])
+        
+        if debit and debit.strip() and not debit.isspace():
+            amount = debit
+            transaction_type = 'debit'
+        elif credit and credit.strip() and not credit.isspace():
+            amount = credit  
+            transaction_type = 'credit'
+    elif 'amount' in column_mapping:
+        amount = get_col_data(column_mapping['amount'])
+        # Try to determine if it's debit/credit from the amount sign or description
+        if amount.startswith('-') or 'debit' in description.lower():
+            transaction_type = 'debit'
+        else:
+            transaction_type = 'credit'
+    else:
+        # Fallback to positional mapping
+        amount = get_col_data(3)
+    
+    return {
+        'date': date,
+        'description': description,
+        'amount': amount,
+        'balance': balance,
+        'transaction_type': transaction_type,
+        'reference': reference,
+        'page': page_num,
+        'raw_data': row_data,
+        'source': 'intelligent_table_parsing',
+        'column_mapping_used': column_mapping
+    }
+
 def parse_advanced_tables(tables: List[Dict], all_cells: List[Dict], blocks: List[Dict]) -> List[Dict[str, Any]]:
     """Advanced table parsing that handles relationship issues"""
     transactions = []
@@ -108,9 +197,22 @@ def parse_advanced_tables(tables: List[Dict], all_cells: List[Dict], blocks: Lis
         
         logger.info(f"Page {page_num}: Found {max_row} rows and {max_col} columns")
         
+        # Analyze header row to understand column mapping
+        header_row = {}
+        if 1 in cell_grid:
+            for col in range(1, max_col + 1):
+                header_text = cell_grid[1].get(col, '').strip().lower()
+                header_row[col] = header_text
+        
+        logger.info(f"Page {page_num} headers: {header_row}")
+        
+        # Intelligently map columns based on headers
+        column_mapping = detect_column_mapping(header_row)
+        logger.info(f"Page {page_num} column mapping: {column_mapping}")
+        
         page_transaction_count = 0
         
-        # Convert grid to transactions (skip row 1 assuming it's header)
+        # Convert grid to transactions (skip row 1 as it's header)
         for row in range(2, max_row + 1):
             if row in cell_grid:
                 row_data = []
@@ -119,15 +221,7 @@ def parse_advanced_tables(tables: List[Dict], all_cells: List[Dict], blocks: Lis
                 
                 # Only add if row has meaningful data
                 if any(cell and cell.strip() for cell in row_data):
-                    transaction = {
-                        'date': row_data[0] if len(row_data) > 0 else '',
-                        'description': row_data[1] if len(row_data) > 1 else '',
-                        'amount': row_data[2] if len(row_data) > 2 else '',
-                        'balance': row_data[3] if len(row_data) > 3 else '',
-                        'page': page_num,
-                        'raw_data': row_data,
-                        'source': 'advanced_table_parsing'
-                    }
+                    transaction = create_mapped_transaction(row_data, column_mapping, page_num)
                     transactions.append(transaction)
                     page_transaction_count += 1
         
@@ -183,6 +277,9 @@ def parse_transactions_from_text(blocks: List[Dict]) -> List[Dict[str, Any]]:
                 match = pattern.match(text)
                 if match:
                     groups = match.groups()
+                    if len(groups) == 0:
+                        continue
+                        
                     description = groups[1] if len(groups) > 1 else ''
                     if len(groups) < 4:  # For pattern 3, extract description differently
                         # Remove date and amount from text to get description

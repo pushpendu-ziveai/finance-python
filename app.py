@@ -1,3 +1,4 @@
+# Intelligent column mapping for better transaction parsing
 from fastapi import FastAPI, File, UploadFile, HTTPException, Request, Form
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
